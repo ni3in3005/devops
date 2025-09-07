@@ -1,0 +1,76 @@
+kind: pipeline
+type: docker
+name: docker_build_push
+
+
+platform:
+  os: linux
+  arch: arm64
+
+
+trigger:
+  event: [push]
+  branch: [main]
+
+
+steps:
+
+
+  - name: docker_build_and_push
+    image: plugins/docker:latest
+    settings:
+      repo: <<github-repo>>
+      username:from_secret: DOCKERHUB_USERNAME 
+      password: from_secret: DOCKERHUB_TOKEN
+      context: .
+      dockerfile: ./Dockerfile
+
+
+      tags:
+        - latest
+        - ${DRONE_COMMIT_SHA:0:7}
+        - build-${DRONE_BUILD_NUMBER}
+      buildkit: true
+
+
+  - name: docker_deploy-compose
+    image: docker
+    commands:
+      - mkdir -p /opt/drone/
+      - |
+        cat > /opt/drone/app-docker-compose.yml <<'EOF'
+        services:
+          frontend:
+            image: <<dockerhub-img>>:${IMAGE_TAG:-latest}  # fallback to latest
+            ports:
+              - "3006:3000"
+            restart: unless-stopped
+        EOF
+      # Check if a container is running on port 3006 and remove it if found
+      - CONTAINER_ID=$(docker ps -q --filter "ancestor=frontend:latest" --filter "status=running" --filter "publish=3006")
+      - if [ -n "$CONTAINER_ID" ]; then docker rm -f $CONTAINER_ID; fi     # Run the container in detached mode
+
+
+      - echo "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
+      - docker compose -f /opt/drone/app-docker-compose.yml pull
+      - docker compose -f /opt/drone/app-docker-compose.yml up -d --remove-orphans
+    environment:
+      DOCKERHUB_USER:
+        from_secret: DOCKERHUB_USERNAME 
+      DOCKERHUB_TOKEN:
+        from_secret: DOCKERHUB_TOKEN
+
+
+    volumes:
+      # Mount the Docker socket to allow Docker commands
+      - name: docker_sock
+        path: /var/run/docker.sock
+
+
+# Define volumes for the pipeline
+volumes:
+  # Mount the host's Docker socket to enable Docker commands in the pipeline
+  - name: docker_sock
+    host:
+      path: /var/run/docker.sock
+

@@ -1,0 +1,41 @@
+networks:
+  drone-net: {}
+
+
+services:
+  drone-server:
+    image: drone/drone:2
+    container_name: drone-server
+    restart: unless-stopped
+    networks: [drone-net]
+
+
+    ports:
+      - "8088:80"   # Only localhost; Nginx will reverse-proxy
+    environment:
+      DRONE_SERVER_HOST: ci.domain-name.com
+      DRONE_SERVER_PROTO: https
+      DRONE_RPC_SECRET: "<<Openssl-random-hex>>"
+      DRONE_GITHUB_CLIENT_ID: "<<OAuth-client-id>>"
+      DRONE_GITHUB_CLIENT_SECRET: "<<OAuth-secret-token>>"
+      DRONE_USER_CREATE: "username:<<same-as-github-username>>,admin:true"
+    volumes:
+      - /opt/drone/data:/data
+
+
+  drone-runner:
+    image: drone/drone-runner-docker:1
+    container_name: drone-runner
+    restart: unless-stopped
+    networks: [drone-net]
+    depends_on:
+      - drone-server
+    environment:
+      DRONE_RPC_HOST: ci.domain-name.com
+      DRONE_RPC_PROTO: https
+      DRONE_RPC_SECRET: "<<Openssl-random-hex>>"
+      DRONE_RUNNER_CAPACITY: 2
+      DRONE_RUNNER_NAME: runner-1
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
